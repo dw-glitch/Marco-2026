@@ -582,12 +582,128 @@
                 font-size: 7px;
             }
         }
+
+        /* Edit mode toggle button */
+        .edit-toggle {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 40px;
+            height: 36px;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 220ms ease;
+            z-index: 50;
+            font-size: 20px;
+            backdrop-filter: blur(4px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }
+
+        .edit-toggle:hover { transform: translateY(-2px); }
+        .edit-toggle.active {
+            background: #ffefc2;
+            color: #6b4a00;
+            box-shadow: 0 6px 18px rgba(107,74,0,0.12);
+            border-color: rgba(0,0,0,0.06);
+        }
+
+        /* Edit mode indicator */
+        .edit-label {
+            position: absolute;
+            top: 12px;
+            right: 60px;
+            z-index: 60;
+            background: rgba(255,255,255,0.12);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(255,255,255,0.06);
+        }
+        body.editing .edit-label { display: flex; }
+
+        /* Color picker popup */
+        .color-popover {
+            position: fixed;
+            min-width: 150px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.14);
+            padding: 8px;
+            display: none;
+            gap: 8px;
+            align-items: center;
+            z-index: 120;
+            transform-origin: top left;
+            transition: transform 160ms cubic-bezier(.2,.9,.3,1), opacity 160ms ease;
+            opacity: 0;
+            border: 1px solid #e9ecef;
+        }
+
+        .color-popover.show {
+            display: flex;
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .color-option {
+            flex: 1;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            padding: 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            user-select: none;
+            transition: transform 140ms ease;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+        }
+
+        .color-option.red { background: #ffeaea; color: #721c24; border: 1px solid #f8d7da; }
+        .color-option.green { background: #e8f5e8; color: #155724; border: 1px solid #c3e6cb; }
+        .color-option.yellow { background: #fff8e1; color: #856404; border: 1px solid #ffeaa7; }
+
+        /* Mobile tweaks for edit UI */
+        @media (max-width: 768px) {
+            .edit-toggle {
+                top: 8px;
+                right: 8px;
+                width: 36px;
+                height: 34px;
+            }
+            .edit-label {
+                top: 8px;
+                right: 52px;
+                font-size: 11px;
+                padding: 5px 8px;
+            }
+            .color-popover {
+                min-width: 140px;
+                padding: 6px;
+                gap: 6px;
+            }
+        }
     </style>
     <script>
         // Configurações para persistência de dados
         const STORAGE_KEY = 'calendario_pilula_marco_2026';
         const BACKUP_KEY = 'calendario_pilula_backup_marco';
         
+        // New constants for color customization (month/year specific)
+        const COLORS_KEY = 'calendario_colors_03_2026'; // calendario_colors_[month]_[year]
+        let isEditing = false;
+
         // Função para carregar dados salvos com múltiplas fontes
         function loadTakenDays() {
             try {
@@ -736,6 +852,170 @@
             }
         }
 
+        // Load saved colors (map dayNumber => colorClass)
+        function loadColors() {
+            try {
+                const raw = localStorage.getItem(COLORS_KEY);
+                return raw ? JSON.parse(raw) : {};
+            } catch (e) {
+                console.warn('Error loading colors:', e);
+                return {};
+            }
+        }
+
+        // Save colors with backup
+        function saveColors(colors) {
+            try {
+                localStorage.setItem(COLORS_KEY, JSON.stringify(colors));
+                localStorage.setItem(COLORS_KEY + '_backup', JSON.stringify(colors));
+                return true;
+            } catch (e) {
+                console.error('Error saving colors:', e);
+                return false;
+            }
+        }
+
+        // Export data (taken days + colors) as JSON file
+        function exportData() {
+            try {
+                const data = {
+                    takenDays: loadTakenDays(),
+                    colors: loadColors(),
+                    timestamp: new Date().toISOString(),
+                    version: '1.0'
+                };
+                const dataStr = JSON.stringify(data, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'calendario_pilula_backup_03_2026.json';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+                console.log('Export completed.');
+            } catch (e) {
+                console.error('Error exporting data:', e);
+                alert('Erro ao exportar dados. Verifique o console para mais detalhes.');
+            }
+        }
+        
+        // Toggle edit mode
+        function toggleEditMode() {
+            isEditing = !isEditing;
+            document.body.classList.toggle('editing', isEditing);
+            const btn = document.querySelector('.edit-toggle');
+            if (btn) btn.classList.toggle('active', isEditing);
+            if (!isEditing) closeColorPicker();
+        }
+
+        // Create and initialize edit UI (button, label, popover)
+        function initializeEditMode() {
+            const header = document.querySelector('.header');
+            if (header) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'edit-toggle';
+                btn.title = 'Toggle edit mode';
+                btn.innerHTML = '⋮';
+                btn.addEventListener('click', toggleEditMode);
+                header.appendChild(btn);
+
+                const lbl = document.createElement('div');
+                lbl.className = 'edit-label';
+                lbl.textContent = 'Editing';
+                header.appendChild(lbl);
+            }
+
+            // Create color popover (hidden by default)
+            const pop = document.createElement('div');
+            pop.className = 'color-popover';
+            pop.innerHTML = `
+                <div class="color-option red" data-color="red-period">🔴</div>
+                <div class="color-option green" data-color="green-period">🟢</div>
+                <div class="color-option yellow" data-color="yellow-period">🟡</div>
+            `;
+            document.body.appendChild(pop);
+
+            // Click handlers for color choices
+            pop.addEventListener('click', (ev) => {
+                const opt = ev.target.closest('.color-option');
+                if (!opt || !pop._targetDay) return;
+                const colorClass = opt.getAttribute('data-color');
+                applyColorToDay(pop._targetDay, colorClass);
+                closeColorPicker();
+            });
+
+            // Close when clicking outside
+            document.addEventListener('click', (ev) => {
+                const target = ev.target;
+                if (!isEditing) return;
+                const pop = document.querySelector('.color-popover');
+                if (!pop) return;
+                if (pop.contains(target)) return;
+                if (target.closest('.day')) return;
+                closeColorPicker();
+            }, { capture: true });
+        }
+
+        function openColorPicker(dayEl, event) {
+            const pop = document.querySelector('.color-popover');
+            if (!pop) return;
+            pop._targetDay = dayEl;
+            const rect = dayEl.getBoundingClientRect();
+            const left = Math.min(window.innerWidth - 160, rect.left + window.scrollX + rect.width / 2);
+            const top = rect.top + window.scrollY + rect.height + 8;
+            pop.style.left = left + 'px';
+            pop.style.top = top + 'px';
+            pop.classList.add('show');
+        }
+
+        function closeColorPicker() {
+            const pop = document.querySelector('.color-popover');
+            if (!pop) return;
+            pop._targetDay = null;
+            pop.classList.remove('show');
+        }
+
+        // Removes any existing period color classes then adds the chosen one
+        function applyColorToDay(dayEl, colorClass) {
+            if (!dayEl) return;
+            const dayNumber = parseInt(dayEl.textContent);
+            if (!dayNumber) return;
+
+            // Remove editable period classes (we preserve non-period classes like 'taken'/'empty')
+            dayEl.classList.remove('red-period', 'green-period', 'yellow-period', 'pink-period');
+            dayEl.classList.add(colorClass);
+
+            // Persist mapping
+            try {
+                const colors = loadColors();
+                colors[dayNumber] = colorClass;
+                saveColors(colors);
+                console.log('Saved color for', dayNumber, colorClass);
+            } catch (e) {
+                console.error('Failed saving color for day', dayNumber, e);
+            }
+        }
+
+        // Apply loaded colors to all day elements; if none saved, keep original classes
+        function applySavedColorsToCalendar() {
+            const colors = loadColors();
+            const dayElements = document.querySelectorAll('.day:not(.empty)');
+            dayElements.forEach(dayEl => {
+                const dayNumber = parseInt(dayEl.textContent);
+                if (!dayNumber) return;
+                if (colors && colors[dayNumber]) {
+                    // Apply saved color
+                    dayEl.classList.remove('red-period', 'green-period', 'yellow-period', 'pink-period');
+                    dayEl.classList.add(colors[dayNumber]);
+                } else {
+                    // No saved color: keep existing markup (default scheme in HTML)
+                }
+            });
+        }
+
         // Função para inicializar o calendário
         function initializeCalendar() {
             // Verifica compatibilidade
@@ -750,44 +1030,38 @@
             if (!takenDays || takenDays.length === 0) {
                 takenDays = recoverData();
             }
-            
+
+            // Apply saved colors BEFORE setting listeners
+            applySavedColorsToCalendar();
+
             const dayElements = document.querySelectorAll('.day:not(.empty)');
             
             // Adiciona event listeners e marca dias já tomados
             dayElements.forEach(dayElement => {
                 const dayNumber = parseInt(dayElement.textContent);
                 
+                // Mark taken days (existing behavior)
                 if (dayNumber && takenDays.includes(dayNumber)) {
                     dayElement.classList.add('taken');
                 }
-                
-                // Adiciona evento de clique apenas para dias válidos (não pausa)
-                if (dayNumber && !dayElement.classList.contains('yellow-period')) {
-                    dayElement.addEventListener('click', () => toggleDay(dayElement));
+
+                // Add unified click handler: edit mode -> open picker, otherwise toggle day (if allowed)
+                if (dayNumber) {
+                    dayElement.addEventListener('click', (e) => {
+                        if (isEditing) {
+                            // In edit mode, open the color picker
+                            openColorPicker(dayElement, e);
+                            return;
+                        }
+                        // Not editing: fall back to original toggle behavior (do not toggle for yellow-period)
+                        if (!dayElement.classList.contains('yellow-period')) {
+                            toggleDay(dayElement);
+                        }
+                    });
                 }
             });
             
             console.log('Calendário inicializado. Dias marcados:', takenDays);
-        }
-
-        // Função para exportar dados (opcional)
-        function exportData() {
-            const data = {
-                takenDays: loadTakenDays(),
-                timestamp: new Date().toISOString(),
-                version: '1.0'
-            };
-            
-            const dataStr = JSON.stringify(data, null, 2);
-            const blob = new Blob([dataStr], {type: 'application/json'});
-            const url = URL.createObjectURL(blob);
-            
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = 'calendario_pilula_backup.json';
-            link.click();
-            
-            URL.revokeObjectURL(url);
         }
 
         // Salva periodicamente para garantir persistência
@@ -799,7 +1073,10 @@
         }, 30000); // A cada 30 segundos
 
         // Inicializa quando a página carrega
-        document.addEventListener('DOMContentLoaded', initializeCalendar);
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeEditMode();
+            initializeCalendar();
+        });
         
         // Salva antes de sair da página
         window.addEventListener('beforeunload', () => {
@@ -875,9 +1152,9 @@
                     <div class="day yellow-period">26</div>
                     <div class="day yellow-period">27</div>
                     <div class="day yellow-period">28</div>
-                    <div class="day pink-period">29</div>
-                    <div class="day pink-period">30</div>
-                    <div class="day pink-period">31</div>
+                    <div class="day red-period">29</div>
+                    <div class="day red-period">30</div>
+                    <div class="day red-period">31</div>
                     <div class="day empty"></div>
                 </div>
             </div>
@@ -911,10 +1188,10 @@
                     </div>
                     
                     <div class="legend-item">
-                        <div class="legend-color pink-period"></div>
+                        <div class="legend-color red-period"></div>
                         <div class="legend-text">
-                            <div class="legend-title">🌸 Dias 29 a 31</div>
-                            <div class="legend-desc">Nova cartela (totalmente protegida)</div>
+                            <div class="legend-title">🔴 Dias 29 a 31</div>
+                            <div class="legend-desc">Tomar pílula (precisa usar camisinha)</div>
                         </div>
                     </div>
                 </div>
